@@ -1,0 +1,2034 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CSS Shape Plotter — a CSS shape() visualiser and generator</title>
+<!-- Single file: stylesheet and script are inlined below. No build step,
+     no dependencies. Open it straight from disk. -->
+<meta name="description" content="Draw a CSS shape() by dragging, or paste a shape(), an SVG or a path d attribute to edit it.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* CSS Shape Plotter — stylesheet.
+   One scoping class (.studio) holds the palette so the whole sheet can be
+   dropped into another page without colliding with its globals. */
+
+html, body { margin: 0; height: 100%; background: #1b2426; }
+
+
+.studio {
+  --chrome: #1b2426;
+  --chrome-2: #232e30;
+  --chrome-3: #2c3a3c;
+  --edge: #3c4c4e;
+  --text: #e8ece9;
+  --muted: #90a3a0;
+  --bed: #dbe1dd;
+  --bed-line: #b6c0bb;
+  --pen-a: #e4326b;
+  --pen-b: #0fa3ba;
+  --amber: #e0a33c;
+  font-family: Archivo, 'Segoe UI', system-ui, sans-serif;
+  background: var(--chrome);
+  color: var(--text);
+  min-height: 100%;
+  padding: 18px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.studio *, .studio *::before, .studio *::after { box-sizing: border-box; }
+.studio h1, .studio h2, .studio p, .studio ol, .studio figure { margin: 0; }
+.studio ol { list-style: none; padding: 0; }
+.studio code, .studio pre, .studio input, .studio select, .studio .unit, .studio .idx {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+}
+.studio button, .studio select, .studio input { font-size: 12px; color: inherit; }
+.studio button { cursor: pointer; }
+.studio :focus-visible { outline: 2px solid var(--pen-b); outline-offset: 2px; }
+
+/* header ------------------------------------------------------------------ */
+.top {
+  display: flex; flex-wrap: wrap; gap: 16px;
+  align-items: flex-end; justify-content: space-between;
+  padding-bottom: 14px; border-bottom: 1px solid var(--edge);
+}
+.brand { display: flex; gap: 12px; align-items: center; }
+.mark {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: radial-gradient(circle at 32% 32%, var(--pen-a) 0 42%, transparent 43%),
+              radial-gradient(circle at 68% 68%, var(--pen-b) 0 42%, transparent 43%);
+  border: 1px solid var(--edge);
+}
+.top h1 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+.top p { font-size: 12px; color: var(--muted); }
+.topctl { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field > span { font-size: 11px; color: var(--muted); }
+.dims { display: flex; align-items: center; gap: 4px; }
+.dims input { width: 58px; }
+.dims i { color: var(--muted); font-style: normal; }
+
+.studio select, .studio input[type=number], .studio input[type=text], .studio .importrow input {
+  background: var(--chrome-2); border: 1px solid var(--edge);
+  border-radius: 4px; padding: 4px 6px; color: var(--text);
+}
+.studio input[type=number] { width: 62px; }
+
+/* layout ------------------------------------------------------------------ */
+.layout {
+  display: grid; gap: 16px; padding-top: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 380px);
+  grid-template-areas: 'stage panel' 'out panel';
+  align-items: start;
+}
+.stage { grid-area: stage; }
+.panel { grid-area: panel; }
+.out { grid-area: out; }
+@media (max-width: 900px) {
+  .layout { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'stage' 'panel' 'out'; }
+}
+
+/* stage ------------------------------------------------------------------- */
+.stagebar {
+  display: flex; flex-wrap: wrap; gap: 10px;
+  align-items: center; justify-content: space-between; margin-bottom: 10px;
+}
+.presets { display: flex; flex-wrap: wrap; gap: 5px; }
+.presets button {
+  background: transparent; border: 1px solid var(--edge);
+  border-radius: 999px; padding: 3px 10px; color: var(--muted);
+}
+.presets button:hover { color: var(--text); border-color: var(--pen-b); }
+.toggles { display: flex; gap: 12px; }
+.check { display: inline-flex; gap: 5px; align-items: center; font-size: 12px; color: var(--muted); }
+.check input { accent-color: var(--pen-b); }
+
+.bedwrap { background: var(--bed); border-radius: 3px; padding: 6px; }
+.bedwrap { display: flex; justify-content: center; }
+/* Cap the bed by height so the CSS output stays above the fold on a laptop.
+   preserveAspectRatio keeps the drawing centred in whatever width is left. */
+.bed { display: block; width: 100%; height: auto; max-height: 56vh; touch-action: none; }
+/* Only the fat invisible .hit strokes and the handles take pointer events.
+   If the painted path were hit-testable too, changing its stroke-width on
+   hover would move its own hit region and re-fire the boundary events. */
+.gridlines, .box, .fill, .tangent, .seg, .ghost { pointer-events: none; }
+.gridlines line { stroke: var(--bed-line); }
+.box { fill: none; stroke: #8d9a95; stroke-dasharray: 6 4; }
+.fill { fill: rgba(228, 50, 107, 0.10); }
+.tangent { stroke: var(--pen-b); opacity: 0.75; }
+.seg { fill: none; stroke: var(--pen-a); stroke-linecap: round; stroke-linejoin: round; }
+.seg.is-hot { stroke: #111c1e; }
+.seg.is-jump { stroke: #9aa7a2; }
+.hit { fill: none; stroke: transparent; cursor: pointer; }
+.ghost { fill: none; stroke: var(--pen-b); opacity: 0.55; stroke-dasharray: 2 2; }
+.handle { cursor: grab; }
+.handle:active { cursor: grabbing; }
+.halo { fill: transparent; }
+.node { fill: #fff; stroke: var(--pen-a); }
+.node.is-origin { fill: var(--pen-a); }
+.node.is-jump { stroke: #7e8b86; }
+.node.is-hot { fill: var(--pen-a); }
+.ctrl { fill: var(--bed); stroke: var(--pen-b); }
+
+.previews { margin-top: 14px; }
+.previews figure { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.previews figcaption { font-size: 11px; color: var(--muted); }
+.clipped { position: relative; max-width: 100%; }
+.clipped.is-bordered { border: 10px solid var(--pen-a); }
+.clipped-art {
+  width: 100%; height: 100%;
+  background:
+    repeating-linear-gradient(135deg, rgba(255,255,255,0.10) 0 9px, transparent 9px 18px),
+    linear-gradient(150deg, var(--pen-a), #7a2f8f 52%, var(--pen-b));
+}
+.traveller {
+  position: absolute; top: 0; left: 0; width: 16px; height: 16px;
+  background: var(--amber); offset-distance: 0%;
+}
+.traveller.is-running { animation: travel 4.5s linear infinite; }
+@keyframes travel { to { offset-distance: 100%; } }
+@media (prefers-reduced-motion: reduce) { .traveller.is-running { animation: none; } }
+
+/* panel ------------------------------------------------------------------- */
+.panel, .out {
+  background: var(--chrome-2); border: 1px solid var(--edge);
+  border-radius: 6px; padding: 12px;
+}
+.panelhead { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.panelhead h2 { font-size: 12px; font-weight: 600; color: var(--muted); }
+.hint { font-size: 11px; color: var(--muted); margin-left: auto; }
+.spacer { flex: 1; }
+
+.fromrow, .cprow {
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  padding: 6px 8px; border-radius: 4px; background: var(--chrome-3);
+}
+.fromrow { margin-bottom: 10px; border-left: 3px solid var(--pen-a); }
+.cplabel { font-size: 11px; color: var(--muted); min-width: 54px; }
+
+.rows { display: flex; flex-direction: column; gap: 8px; max-height: 46vh; overflow: auto; }
+.row {
+  border: 1px solid var(--edge); border-radius: 5px;
+  padding: 7px 8px; background: var(--chrome);
+}
+.row.is-hot { border-color: var(--pen-a); background: #212d2c; }
+.rowhead { display: flex; gap: 6px; align-items: center; }
+.rowhead button {
+  background: transparent; border: none; color: var(--muted);
+  padding: 2px 4px; border-radius: 3px; line-height: 1;
+}
+.rowhead button:hover { color: var(--text); background: var(--chrome-3); }
+.idx { font-size: 11px; color: var(--muted); min-width: 16px; }
+.rowbody { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 7px; }
+.cpgroup { display: flex; flex-direction: column; gap: 5px; margin-top: 7px; }
+
+.numunit { display: inline-flex; align-items: center; gap: 3px; }
+.numunit em { font-size: 10px; color: var(--muted); font-style: normal; }
+.numunit input { width: 56px; }
+.unit {
+  background: var(--chrome-3); border: 1px solid var(--edge);
+  border-radius: 3px; padding: 2px 5px; color: var(--muted); font-size: 11px;
+}
+.unit:hover { color: var(--pen-b); }
+.unit.static { cursor: default; }
+
+.frag {
+  display: block; margin-top: 7px; font-size: 11px;
+  color: var(--pen-b); word-break: break-word;
+}
+.adds { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
+.adds button {
+  background: var(--chrome-3); border: 1px solid var(--edge);
+  border-radius: 4px; padding: 3px 8px; color: var(--muted);
+}
+.adds button:hover { color: var(--text); border-color: var(--pen-b); }
+.why { margin-top: 10px; font-size: 11px; color: var(--muted); min-height: 2.4em; }
+
+/* output ------------------------------------------------------------------ */
+.ghostbtn {
+  background: transparent; border: 1px solid var(--edge);
+  border-radius: 4px; padding: 3px 9px; color: var(--muted);
+}
+.ghostbtn:hover { color: var(--text); border-color: var(--pen-b); }
+.code {
+  background: var(--chrome); border: 1px solid var(--edge); border-radius: 5px;
+  padding: 11px; font-size: 12px; line-height: 1.6; color: #cfe6e4;
+  white-space: pre-wrap; word-break: break-word; overflow-x: auto;
+}
+.warn {
+  font-size: 11px; color: var(--amber); margin-bottom: 8px;
+  border-left: 2px solid var(--amber); padding-left: 8px;
+}
+.warn code { color: inherit; }
+.importer { margin-top: 12px; }
+.importhead { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+.importer textarea {
+  width: 100%; background: var(--chrome); border: 1px solid var(--edge);
+  border-radius: 4px; padding: 7px 8px; color: var(--text);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px;
+  line-height: 1.55; resize: vertical;
+}
+.importer textarea::placeholder { color: #63736f; }
+.badge {
+  font-size: 10px; padding: 1px 7px; border-radius: 999px;
+  border: 1px solid var(--edge); color: var(--muted);
+}
+.badge.is-svg, .badge.is-path { color: var(--pen-b); border-color: var(--pen-b); }
+.badge.is-css { color: var(--pen-a); border-color: var(--pen-a); }
+.ghostbtn[disabled] { opacity: 0.4; cursor: not-allowed; }
+.note { font-size: 11px; color: var(--pen-b); margin-top: 7px; }
+.importer label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 5px; }
+.importrow { display: flex; gap: 8px; align-items: center; margin-top: 7px; }
+.importrow .check { gap: 6px; }
+.importrow input { flex: 1; min-width: 0; font-size: 11px; }
+</style>
+</head>
+<body>
+
+<div class="studio">
+
+  <header class="top">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"></span>
+      <div>
+        <h1>CSS Shape Plotter</h1>
+        <p>Drag the path, read the CSS.</p>
+      </div>
+    </div>
+
+    <div class="topctl">
+      <label class="field">
+        <span>property</span>
+        <select id="prop">
+          <option value="clip-path">clip-path</option>
+          <option value="border-shape">border-shape</option>
+          <option value="offset-path">offset-path</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>fill-rule</span>
+        <select id="fillrule">
+          <option value="nonzero">nonzero</option>
+          <option value="evenodd">evenodd</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>box</span>
+        <span class="dims">
+          <input type="number" id="boxw" value="320" min="20" max="4000" aria-label="box width">
+          <i>&times;</i>
+          <input type="number" id="boxh" value="320" min="20" max="4000" aria-label="box height">
+        </span>
+      </label>
+    </div>
+  </header>
+
+  <main class="layout">
+
+    <section class="stage">
+      <div class="stagebar">
+        <div class="presets" id="presets"></div>
+        <div class="toggles">
+          <label class="check"><input type="checkbox" id="showgrid" checked> grid</label>
+          <label class="check" title="Hold Alt while dragging to bypass">
+            <input type="checkbox" id="snap"> snap
+          </label>
+        </div>
+      </div>
+
+      <div class="bedwrap">
+        <svg id="bed" class="bed" xmlns="http://www.w3.org/2000/svg"
+             preserveAspectRatio="xMidYMid meet"
+             role="application" aria-label="Shape plotting bed"></svg>
+      </div>
+
+      <div class="previews">
+        <figure>
+          <div class="clipped" id="preview">
+            <div class="clipped-art"></div>
+            <span class="traveller" id="traveller" hidden></span>
+          </div>
+          <figcaption id="previewcap"></figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panelhead">
+        <h2>Commands</h2>
+        <span class="hint" id="stepcount"></span>
+      </div>
+
+      <div class="fromrow" id="fromrow"></div>
+      <ol class="rows" id="rows"></ol>
+      <div class="adds" id="adds"></div>
+      <p class="why" id="why"></p>
+    </section>
+
+    <section class="out">
+      <div class="panelhead">
+        <h2>CSS</h2>
+        <label class="check" title="Drop keywords that match the spec defaults">
+          <input type="checkbox" id="compact"> compact
+        </label>
+        <span class="spacer"></span>
+        <button type="button" class="ghostbtn" id="copycss">Copy CSS</button>
+        <button type="button" class="ghostbtn" id="copysvg">Copy SVG path</button>
+      </div>
+
+      <div id="warnings"></div>
+      <pre class="code" id="code"></pre>
+
+      <div class="importer">
+        <div class="importhead">
+          <label for="imp">Paste a shape(), an SVG, or a path d attribute</label>
+          <span class="badge" id="badge" hidden></span>
+        </div>
+        <textarea id="imp" rows="3" spellcheck="false"
+placeholder="clip-path: shape(from 0% 0%, line to 100% 100%, close);
+&lt;svg viewBox=&quot;0 0 24 24&quot;&gt;&lt;path d=&quot;M12 2 L22 22 H2 Z&quot;/&gt;&lt;/svg&gt;
+M12 2 L22 22 H2 Z"></textarea>
+        <div class="importrow">
+          <label class="check" title="Percentages scale with the box; pixels stay put">
+            <span>coordinates</span>
+            <select id="units">
+              <option value="percent">percent</option>
+              <option value="pixels">pixels</option>
+            </select>
+          </label>
+          <span class="spacer"></span>
+          <button type="button" class="ghostbtn" id="load" disabled>Load</button>
+        </div>
+        <p id="importmsg"></p>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+/* CSS Shape Plotter — CSS shape() visualiser and generator.
+   Plain JavaScript, no dependencies, no build step.
+
+   Part 1 is the model, serialiser, geometry evaluator and the two parsers.
+   Part 2 (further down, under VIEW) is the DOM layer. */
+
+/* ============================================================================
+   MODEL
+   ----------------------------------------------------------------------------
+   Every coordinate is stored as { v: number, u: '%' | 'px' } so we can round-trip
+   between CSS text and pixels without losing the author's chosen unit.
+
+   Percentages resolve against the reference box: x against width, y against
+   height. That is true for `to` (absolute) AND `by` (relative) values.
+   ========================================================================== */
+
+const uid = () => Math.random().toString(36).slice(2, 9);
+const V = (v, u = "%") => ({ v, u });
+const r2 = (n) => Math.round(n * 100) / 100;
+
+const toPx = (val, basis) => (val.u === "%" ? (val.v * basis) / 100 : val.v);
+const fromPx = (px, basis, u) => (u === "%" ? (basis ? (px * 100) / basis : 0) : px);
+const setPx = (old, px, basis) => ({ v: r2(fromPx(px, basis, old.u)), u: old.u });
+const fmt = (val) => `${r2(val.v)}${val.u}`;
+
+const CP = (x, y, from = "origin") => ({ x, y, from });
+
+/* ---------------------------------------------------------------- commands */
+
+const COMMANDS = {
+  move: "move",
+  line: "line",
+  hline: "hline",
+  vline: "vline",
+  curve: "curve",
+  smooth: "smooth",
+  arc: "arc",
+  close: "close",
+};
+
+const BLURB = {
+  move: "Lifts the pen and jumps. Starts a new subpath — nothing is drawn.",
+  line: "Straight line to the endpoint.",
+  hline: "Horizontal line. Only x changes; y is carried over.",
+  vline: "Vertical line. Only y changes; x is carried over.",
+  curve: "Bézier. One control point gives a quadratic, two give a cubic.",
+  smooth: "Bézier that reflects the previous control point, so the join has no kink.",
+  arc: "Elliptical arc. Radii, sweep, and size pick one of four possible arcs.",
+  close: "Straight line back to the start of the current subpath.",
+};
+
+function makeCommand(type, cur, keepPoint = false) {
+  const base = { id: uid(), type, rel: "to" };
+  const x = V(r2(cur.xPct));
+  const y = V(r2(cur.yPct));
+  // A brand-new command lands a little past the current point so it is visible.
+  // Switching an existing command's type keeps the point exactly where it was.
+  const nx = keepPoint ? x : V(Math.min(100, r2(x.v + 25)));
+  const ny = keepPoint ? y : V(Math.min(100, r2(y.v + 15)));
+
+  switch (type) {
+    case "close":
+      return base;
+    case "hline":
+      return { ...base, x: nx, y };
+    case "vline":
+      return { ...base, x, y: ny };
+    case "curve":
+      return {
+        ...base,
+        x: nx,
+        y: ny,
+        cubic: true,
+        c1: CP(V(r2(x.v + 8)), V(Math.max(0, r2(y.v - 22)))),
+        c2: CP(V(r2(nx.v - 8)), V(Math.max(0, r2(ny.v - 22)))),
+      };
+    case "smooth":
+      return {
+        ...base,
+        x: nx,
+        y: ny,
+        cubic: true,
+        c1: CP(V(r2(nx.v - 8)), V(Math.min(100, r2(ny.v + 22)))),
+      };
+    case "arc":
+      return {
+        ...base,
+        x: nx,
+        y: ny,
+        rx: V(20),
+        ry: V(20),
+        circle: true,
+        sweep: "cw",
+        size: "small",
+        rotate: 0,
+      };
+    default:
+      return { ...base, x: nx, y: ny };
+  }
+}
+
+/* ============================================================================
+   CSS SERIALISATION
+   ========================================================================== */
+
+function cpCss(cp, rel, compact) {
+  const pair = `${fmt(cp.x)} ${fmt(cp.y)}`;
+  // In `to` mode a bare pair is a <position>, i.e. measured from the origin.
+  // In `by` mode a bare pair defaults to `from start`.
+  if (compact) {
+    if (rel === "to" && cp.from === "origin") return pair;
+    if (rel === "by" && cp.from === "start") return pair;
+  }
+  return `${pair} from ${cp.from}`;
+}
+
+function cmdCss(c, compact) {
+  switch (c.type) {
+    case "close":
+      return "close";
+    case "hline":
+      return `hline ${c.rel} ${fmt(c.x)}`;
+    case "vline":
+      return `vline ${c.rel} ${fmt(c.y)}`;
+    case "curve": {
+      const pts = [cpCss(c.c1, c.rel, compact)];
+      if (c.cubic) pts.push(cpCss(c.c2, c.rel, compact));
+      return `curve ${c.rel} ${fmt(c.x)} ${fmt(c.y)} with ${pts.join(" / ")}`;
+    }
+    case "smooth":
+      return (
+        `smooth ${c.rel} ${fmt(c.x)} ${fmt(c.y)}` +
+        (c.cubic ? ` with ${cpCss(c.c1, c.rel, compact)}` : "")
+      );
+    case "arc": {
+      let s = `arc ${c.rel} ${fmt(c.x)} ${fmt(c.y)} of ${fmt(c.rx)}`;
+      if (!c.circle) s += ` ${fmt(c.ry)}`;
+      if (!compact || c.sweep !== "ccw") s += ` ${c.sweep}`;
+      if (!compact || c.size !== "small") s += ` ${c.size}`;
+      if (c.rotate) s += ` rotate ${c.rotate}deg`;
+      return s;
+    }
+    default:
+      return `${c.type} ${c.rel} ${fmt(c.x)} ${fmt(c.y)}`;
+  }
+}
+
+function shapeCss(shape, { compact = false, fillRule = true, multiline = true } = {}) {
+  const head =
+    (fillRule && shape.fillRule !== "nonzero" ? `${shape.fillRule} ` : "") +
+    `from ${fmt(shape.from.x)} ${fmt(shape.from.y)}`;
+  const parts = [head, ...shape.commands.map((c) => cmdCss(c, compact))];
+  if (!multiline) return `shape(${parts.join(", ")})`;
+  return `shape(\n  ${parts.join(",\n  ")}\n)`;
+}
+
+/* ============================================================================
+   GEOMETRY — resolve the shape into pixels and an SVG path
+   ----------------------------------------------------------------------------
+   Smooth commands are expanded into explicit C/Q segments rather than S/T so we
+   can draw the reflected control point that the browser infers.
+   ========================================================================== */
+
+function reflect(point, about) {
+  return { x: 2 * about.x - point.x, y: 2 * about.y - point.y };
+}
+
+function resolveCp(cp, W, H, start, end) {
+  const dx = toPx(cp.x, W);
+  const dy = toPx(cp.y, H);
+  if (cp.from === "origin") return { x: dx, y: dy };
+  if (cp.from === "end") return { x: end.x + dx, y: end.y + dy };
+  return { x: start.x + dx, y: start.y + dy };
+}
+
+function cpPatch(key, cp, p, W, H, start, end) {
+  const anchor =
+    cp.from === "origin" ? { x: 0, y: 0 } : cp.from === "end" ? end : start;
+  return {
+    [key]: {
+      ...cp,
+      x: setPx(cp.x, p.x - anchor.x, W),
+      y: setPx(cp.y, p.y - anchor.y, H),
+    },
+  };
+}
+
+function evaluate(shape, W, H) {
+  const n = (v) => (Number.isFinite(v) ? r2(v) : 0);
+  const start0 = { x: toPx(shape.from.x, W), y: toPx(shape.from.y, H) };
+
+  let cur = { ...start0 };
+  let sub = { ...start0 };
+  let prevCtrl = null;
+  let prevKind = null;
+
+  let d = `M ${n(cur.x)} ${n(cur.y)}`;
+  const segments = [];
+  const handles = [
+    {
+      key: "from",
+      kind: "anchor",
+      target: "shape",
+      pt: start0,
+      apply: (p) => ({
+        from: { x: setPx(shape.from.x, p.x, W), y: setPx(shape.from.y, p.y, H) },
+      }),
+    },
+  ];
+
+  for (const c of shape.commands) {
+    const start = { ...cur };
+    let end = { ...cur };
+    let seg = "";
+    const segHandles = [];
+    const ghosts = [];
+    let tangents = [];
+
+    const endTo = () => ({ x: toPx(c.x, W), y: toPx(c.y, H) });
+    const endBy = () => ({ x: start.x + toPx(c.x, W), y: start.y + toPx(c.y, H) });
+
+    const endPatch = (p) => {
+      if (c.rel === "to") return { x: setPx(c.x, p.x, W), y: setPx(c.y, p.y, H) };
+      return { x: setPx(c.x, p.x - start.x, W), y: setPx(c.y, p.y - start.y, H) };
+    };
+
+    switch (c.type) {
+      case "close": {
+        end = { ...sub };
+        seg = "Z";
+        cur = { ...end };
+        prevCtrl = null;
+        prevKind = null;
+        break;
+      }
+      case "move": {
+        end = c.rel === "to" ? endTo() : endBy();
+        seg = `M ${n(end.x)} ${n(end.y)}`;
+        sub = { ...end };
+        segHandles.push({ key: "end", kind: "move", apply: endPatch });
+        prevCtrl = null;
+        prevKind = null;
+        break;
+      }
+      case "line": {
+        end = c.rel === "to" ? endTo() : endBy();
+        seg = `L ${n(end.x)} ${n(end.y)}`;
+        segHandles.push({ key: "end", kind: "point", apply: endPatch });
+        prevCtrl = null;
+        prevKind = null;
+        break;
+      }
+      case "hline": {
+        const x = c.rel === "to" ? toPx(c.x, W) : start.x + toPx(c.x, W);
+        end = { x, y: start.y };
+        seg = `L ${n(end.x)} ${n(end.y)}`;
+        segHandles.push({
+          key: "end",
+          kind: "point",
+          axis: "x",
+          apply: (p) => ({
+            x: setPx(c.x, c.rel === "to" ? p.x : p.x - start.x, W),
+          }),
+        });
+        prevCtrl = null;
+        prevKind = null;
+        break;
+      }
+      case "vline": {
+        const y = c.rel === "to" ? toPx(c.y, H) : start.y + toPx(c.y, H);
+        end = { x: start.x, y };
+        seg = `L ${n(end.x)} ${n(end.y)}`;
+        segHandles.push({
+          key: "end",
+          kind: "point",
+          axis: "y",
+          apply: (p) => ({
+            y: setPx(c.y, c.rel === "to" ? p.y : p.y - start.y, H),
+          }),
+        });
+        prevCtrl = null;
+        prevKind = null;
+        break;
+      }
+      case "curve": {
+        end = c.rel === "to" ? endTo() : endBy();
+        const p1 = resolveCp(c.c1, W, H, start, end);
+        if (c.cubic) {
+          const p2 = resolveCp(c.c2, W, H, start, end);
+          seg = `C ${n(p1.x)} ${n(p1.y)} ${n(p2.x)} ${n(p2.y)} ${n(end.x)} ${n(end.y)}`;
+          tangents = [[start, p1], [end, p2]];
+          segHandles.push(
+            { key: "end", kind: "point", apply: endPatch },
+            {
+              key: "c1",
+              kind: "control",
+              pt: p1,
+              apply: (p) => cpPatch("c1", c.c1, p, W, H, start, end),
+            },
+            {
+              key: "c2",
+              kind: "control",
+              pt: p2,
+              apply: (p) => cpPatch("c2", c.c2, p, W, H, start, end),
+            }
+          );
+          prevCtrl = p2;
+          prevKind = "cubic";
+        } else {
+          seg = `Q ${n(p1.x)} ${n(p1.y)} ${n(end.x)} ${n(end.y)}`;
+          tangents = [[start, p1], [end, p1]];
+          segHandles.push(
+            { key: "end", kind: "point", apply: endPatch },
+            {
+              key: "c1",
+              kind: "control",
+              pt: p1,
+              apply: (p) => cpPatch("c1", c.c1, p, W, H, start, end),
+            }
+          );
+          prevCtrl = p1;
+          prevKind = "quad";
+        }
+        break;
+      }
+      case "smooth": {
+        end = c.rel === "to" ? endTo() : endBy();
+        if (c.cubic) {
+          const mirrored =
+            prevKind === "cubic" && prevCtrl ? reflect(prevCtrl, start) : { ...start };
+          const p2 = resolveCp(c.c1, W, H, start, end);
+          seg = `C ${n(mirrored.x)} ${n(mirrored.y)} ${n(p2.x)} ${n(p2.y)} ${n(end.x)} ${n(end.y)}`;
+          tangents = [[start, mirrored], [end, p2]];
+          ghosts.push(mirrored);
+          segHandles.push(
+            { key: "end", kind: "point", apply: endPatch },
+            {
+              key: "c1",
+              kind: "control",
+              pt: p2,
+              apply: (p) => cpPatch("c1", c.c1, p, W, H, start, end),
+            }
+          );
+          prevCtrl = p2;
+          prevKind = "cubic";
+        } else {
+          const mirrored =
+            prevKind === "quad" && prevCtrl ? reflect(prevCtrl, start) : { ...start };
+          seg = `Q ${n(mirrored.x)} ${n(mirrored.y)} ${n(end.x)} ${n(end.y)}`;
+          tangents = [[start, mirrored], [end, mirrored]];
+          ghosts.push(mirrored);
+          segHandles.push({ key: "end", kind: "point", apply: endPatch });
+          prevCtrl = mirrored;
+          prevKind = "quad";
+        }
+        break;
+      }
+      case "arc": {
+        end = c.rel === "to" ? endTo() : endBy();
+        const rx = Math.abs(toPx(c.rx, W));
+        const ry = Math.abs(c.circle ? toPx(c.rx, H) : toPx(c.ry, H));
+        // CSS cw  -> SVG sweep-flag 1 (positive-angle direction, y axis down)
+        // CSS large -> SVG large-arc-flag 1
+        const sweepFlag = c.sweep === "cw" ? 1 : 0;
+        const largeFlag = c.size === "large" ? 1 : 0;
+        seg =
+          rx === 0 || ry === 0
+            ? `L ${n(end.x)} ${n(end.y)}`
+            : `A ${n(rx)} ${n(ry)} ${c.rotate || 0} ${largeFlag} ${sweepFlag} ${n(end.x)} ${n(end.y)}`;
+        segHandles.push({ key: "end", kind: "point", apply: endPatch });
+        prevCtrl = null;
+        prevKind = null;
+        break;
+      }
+      default:
+        break;
+    }
+
+    if (c.type !== "close" && c.type !== "move") cur = { ...end };
+    if (c.type === "move") cur = { ...end };
+
+    const segPath =
+      c.type === "close" || c.type === "move"
+        ? `M ${n(start.x)} ${n(start.y)} L ${n(end.x)} ${n(end.y)}`
+        : `M ${n(start.x)} ${n(start.y)} ${seg}`;
+
+    d += ` ${seg}`;
+
+    for (const h of segHandles) {
+      handles.push({
+        ...h,
+        target: c.id,
+        pt: h.pt || end,
+        cmdId: c.id,
+      });
+    }
+
+    segments.push({ id: c.id, type: c.type, start, end, segPath, tangents, ghosts });
+  }
+
+  return { d, segments, handles, start0 };
+}
+
+/* ============================================================================
+   PARSER — read an existing shape() back into the editor
+   ========================================================================== */
+
+const UNIT_PX = { px: 1, pt: 4 / 3, pc: 16, in: 96, cm: 96 / 2.54, mm: 96 / 25.4, rem: 16, em: 16, ch: 8, ex: 8 };
+
+function splitTop(str, sep) {
+  const out = [];
+  let depth = 0;
+  let buf = "";
+  for (const ch of str) {
+    if (ch === "(") depth++;
+    if (ch === ")") depth--;
+    if (ch === sep && depth === 0) {
+      out.push(buf);
+      buf = "";
+    } else buf += ch;
+  }
+  out.push(buf);
+  return out.map((s) => s.trim()).filter(Boolean);
+}
+
+function lp(tok) {
+  const m = String(tok).match(/^(-?[\d.]+)(%|[a-z]+)?$/i);
+  if (!m) throw new Error(`Can't read the value "${tok}"`);
+  const v = parseFloat(m[1]);
+  const u = (m[2] || "px").toLowerCase();
+  if (u === "%") return V(v, "%");
+  if (UNIT_PX[u]) return V(r2(v * UNIT_PX[u]), "px");
+  throw new Error(`Unit "${u}" isn't supported here`);
+}
+
+const X_WORDS = { left: 0, right: 100, "x-start": 0, "x-end": 100, "inline-start": 0, "inline-end": 100 };
+const Y_WORDS = { top: 0, bottom: 100, "y-start": 0, "y-end": 100, "block-start": 0, "block-end": 100 };
+
+function parsePosition(toks) {
+  const t = toks.map((s) => s.toLowerCase());
+  if (t.length === 1) {
+    if (t[0] === "center") return { x: V(50), y: V(50) };
+    if (t[0] in X_WORDS) return { x: V(X_WORDS[t[0]]), y: V(50) };
+    if (t[0] in Y_WORDS) return { x: V(50), y: V(Y_WORDS[t[0]]) };
+    return { x: lp(t[0]), y: V(50) };
+  }
+  if (t.length === 4) {
+    const pick = (word, off) =>
+      word in X_WORDS
+        ? { axis: "x", val: V(X_WORDS[word] === 0 ? lp(off).v : 100 - lp(off).v, lp(off).u) }
+        : { axis: "y", val: V(Y_WORDS[word] === 0 ? lp(off).v : 100 - lp(off).v, lp(off).u) };
+    const a = pick(t[0], t[1]);
+    const b = pick(t[2], t[3]);
+    const x = a.axis === "x" ? a.val : b.val;
+    const y = a.axis === "y" ? a.val : b.val;
+    return { x, y };
+  }
+  let [a, b] = t;
+  if (a in Y_WORDS || b in X_WORDS) [a, b] = [b, a]; // `top left` order
+  const x = a === "center" ? V(50) : a in X_WORDS ? V(X_WORDS[a]) : lp(a);
+  const y = b === "center" ? V(50) : b in Y_WORDS ? V(Y_WORDS[b]) : lp(b);
+  return { x, y };
+}
+
+function parseControlPoint(toks, rel) {
+  let from = rel === "to" ? "origin" : "start";
+  const i = toks.findIndex((t) => t.toLowerCase() === "from");
+  let coords = toks;
+  if (i >= 0) {
+    from = toks[i + 1].toLowerCase();
+    coords = toks.slice(0, i);
+  }
+  const pos = parsePosition(coords);
+  return CP(pos.x, pos.y, from);
+}
+
+function parseCommand(clause) {
+  const toks = clause.replace(/\//g, " / ").trim().split(/\s+/);
+  const type = toks[0].toLowerCase();
+  if (type === "close") return { id: uid(), type: "close", rel: "to" };
+  if (!(type in COMMANDS)) throw new Error(`Unknown command "${toks[0]}"`);
+
+  let rel = toks[1] ? toks[1].toLowerCase() : "to";
+  if (rel !== "to" && rel !== "by") throw new Error(`"${type}" needs "to" or "by"`);
+  let rest = toks.slice(2);
+
+  if (type === "hline" || type === "vline") {
+    const val = rest[0].toLowerCase();
+    const words = type === "hline" ? X_WORDS : Y_WORDS;
+    const parsed = val === "center" ? V(50) : val in words ? V(words[val]) : lp(val);
+    return type === "hline"
+      ? { id: uid(), type, rel, x: parsed, y: V(0) }
+      : { id: uid(), type, rel, x: V(0), y: parsed };
+  }
+
+  if (type === "arc") {
+    const ofAt = rest.findIndex((t) => t.toLowerCase() === "of");
+    const endToks = ofAt >= 0 ? rest.slice(0, ofAt) : rest;
+    const pos = parsePosition(endToks);
+    const tail = ofAt >= 0 ? rest.slice(ofAt + 1) : [];
+    const radii = [];
+    let sweep = "ccw";
+    let size = "small";
+    let rotate = 0;
+    for (let i = 0; i < tail.length; i++) {
+      const t = tail[i].toLowerCase();
+      if (t === "cw" || t === "ccw") sweep = t;
+      else if (t === "large" || t === "small") size = t;
+      else if (t === "rotate") rotate = parseFloat(tail[++i]) || 0;
+      else radii.push(lp(t));
+    }
+    return {
+      id: uid(),
+      type,
+      rel,
+      x: pos.x,
+      y: pos.y,
+      rx: radii[0] || V(20),
+      ry: radii[1] || radii[0] || V(20),
+      circle: radii.length < 2,
+      sweep,
+      size,
+      rotate,
+    };
+  }
+
+  const withAt = rest.findIndex((t) => t.toLowerCase() === "with");
+  const endToks = withAt >= 0 ? rest.slice(0, withAt) : rest;
+  const pos = parsePosition(endToks);
+  const cmd = { id: uid(), type, rel, x: pos.x, y: pos.y };
+
+  if (type === "curve" || type === "smooth") {
+    if (withAt < 0) {
+      if (type === "curve") throw new Error("curve needs a `with` control point");
+      return { ...cmd, cubic: false, c1: CP(V(0), V(0), "start") };
+    }
+    const cps = splitTop(rest.slice(withAt + 1).join(" "), "/").map((s) =>
+      parseControlPoint(s.split(/\s+/), rel)
+    );
+    if (type === "smooth") return { ...cmd, cubic: true, c1: cps[0] };
+    return {
+      ...cmd,
+      cubic: cps.length > 1,
+      c1: cps[0],
+      c2: cps[1] || CP(V(0), V(0), rel === "to" ? "origin" : "start"),
+    };
+  }
+  return cmd;
+}
+
+function parseShape(text) {
+  const m = text.match(/shape\s*\(([\s\S]*)\)/i);
+  if (!m) throw new Error("Expected a shape( … ) value");
+  if (/calc|min\(|max\(|clamp/i.test(m[1]))
+    throw new Error("Math functions can't be edited on the canvas yet");
+  const parts = splitTop(m[1], ",");
+  if (!parts.length) throw new Error("Empty shape()");
+
+  let head = parts[0].trim().split(/\s+/);
+  let fillRule = "nonzero";
+  if (["nonzero", "evenodd"].includes(head[0].toLowerCase())) {
+    fillRule = head.shift().toLowerCase();
+  }
+  if (head.shift().toLowerCase() !== "from") throw new Error("shape() must start with `from`");
+  const from = parsePosition(head);
+  const commands = parts.slice(1).map(parseCommand);
+  return { fillRule, from, commands };
+}
+
+/* ============================================================================
+   SVG IMPORT
+   ----------------------------------------------------------------------------
+   SVG path commands map onto shape() almost one-for-one, which is the whole
+   reason shape() looks the way it does:
+
+     M/m -> move (or the `from` point)   C/c -> curve with two control points
+     L/l -> line                         S/s -> smooth, cubic
+     H/h -> hline                        Q/q -> curve with one control point
+     V/v -> vline                        T/t -> smooth, quadratic
+     Z/z -> close                        A/a -> arc
+
+   Uppercase becomes `to`, lowercase becomes `by`. SVG's relative control points
+   are measured from the current point, which is exactly `from start`; absolute
+   ones are `from origin`.
+   ========================================================================== */
+
+const PATH_ARGC = { m: 2, l: 2, h: 1, v: 1, c: 6, s: 4, q: 4, t: 2, a: 7, z: 0 };
+const NUMBER_RE = /^[+-]?(?:\d*\.\d+|\d+\.?)(?:[eE][+-]?\d+)?/;
+
+function scanPathData(d) {
+  const s = String(d).trim();
+  let i = 0;
+  const ws = () => {
+    while (i < s.length && /[\s,]/.test(s[i])) i++;
+  };
+  const number = () => {
+    ws();
+    const m = NUMBER_RE.exec(s.slice(i));
+    if (!m) throw new Error(`Expected a number near "${s.slice(i, i + 12)}"`);
+    i += m[0].length;
+    return parseFloat(m[0]);
+  };
+  // Arc flags are single characters and may be written without separators,
+  // as in "a5 5 0 015 5" — so they cannot go through the number scanner.
+  const flag = () => {
+    ws();
+    const c = s[i];
+    if (c !== "0" && c !== "1") throw new Error(`Expected an arc flag near "${s.slice(i, i + 12)}"`);
+    i++;
+    return c === "1";
+  };
+
+  const out = [];
+  let cmd = null;
+  let guard = 0;
+  ws();
+  while (i < s.length) {
+    if (guard++ > 20000) throw new Error("That path data doesn't terminate");
+    if (/[a-z]/i.test(s[i])) cmd = s[i++];
+    else if (!cmd) throw new Error("Path data has to start with a command letter");
+    else if (cmd === "M") cmd = "L"; // repeated coordinates after a moveto are lines
+    else if (cmd === "m") cmd = "l";
+
+    const key = cmd.toLowerCase();
+    if (!(key in PATH_ARGC)) throw new Error(`Unknown path command "${cmd}"`);
+
+    const args = [];
+    if (key === "a") {
+      args.push(number(), number(), number(), flag(), flag(), number(), number());
+    } else {
+      for (let k = 0; k < PATH_ARGC[key]; k++) args.push(number());
+    }
+    out.push({ cmd, key, args });
+    if (key === "z") cmd = null;
+    ws();
+  }
+  if (!out.length) throw new Error("No path commands found");
+  return out;
+}
+
+function pathDataToShape(d) {
+  const segs = scanPathData(d);
+  const commands = [];
+  const pts = [];
+  let cur = { x: 0, y: 0 };
+  let sub = { x: 0, y: 0 };
+  let from = null;
+
+  const px = (n) => V(r2(n), "px");
+
+  for (const { cmd, key, args } of segs) {
+    const rel = cmd === cmd.toLowerCase() && key !== "z";
+    const mode = rel ? "by" : "to";
+    const anchor = rel ? "start" : "origin";
+    const abs = (x, y) => (rel ? { x: cur.x + x, y: cur.y + y } : { x, y });
+    const ctrl = (x, y) => (rel ? { x: cur.x + x, y: cur.y + y } : { x, y });
+    const base = { id: uid(), rel: mode };
+    let end = { ...cur };
+
+    switch (key) {
+      case "m":
+        end = abs(args[0], args[1]);
+        if (!from) from = { ...end };
+        else commands.push({ ...base, type: "move", x: px(args[0]), y: px(args[1]) });
+        sub = { ...end };
+        break;
+      case "l":
+        end = abs(args[0], args[1]);
+        commands.push({ ...base, type: "line", x: px(args[0]), y: px(args[1]) });
+        break;
+      case "h":
+        end = { x: rel ? cur.x + args[0] : args[0], y: cur.y };
+        commands.push({ ...base, type: "hline", x: px(args[0]), y: px(cur.y) });
+        break;
+      case "v":
+        end = { x: cur.x, y: rel ? cur.y + args[0] : args[0] };
+        commands.push({ ...base, type: "vline", x: px(cur.x), y: px(args[0]) });
+        break;
+      case "c":
+        end = abs(args[4], args[5]);
+        pts.push(ctrl(args[0], args[1]), ctrl(args[2], args[3]));
+        commands.push({
+          ...base,
+          type: "curve",
+          x: px(args[4]),
+          y: px(args[5]),
+          cubic: true,
+          c1: CP(px(args[0]), px(args[1]), anchor),
+          c2: CP(px(args[2]), px(args[3]), anchor),
+        });
+        break;
+      case "s":
+        end = abs(args[2], args[3]);
+        pts.push(ctrl(args[0], args[1]));
+        commands.push({
+          ...base,
+          type: "smooth",
+          x: px(args[2]),
+          y: px(args[3]),
+          cubic: true,
+          c1: CP(px(args[0]), px(args[1]), anchor),
+        });
+        break;
+      case "q":
+        end = abs(args[2], args[3]);
+        pts.push(ctrl(args[0], args[1]));
+        commands.push({
+          ...base,
+          type: "curve",
+          x: px(args[2]),
+          y: px(args[3]),
+          cubic: false,
+          c1: CP(px(args[0]), px(args[1]), anchor),
+          c2: CP(px(0), px(0), anchor),
+        });
+        break;
+      case "t":
+        end = abs(args[0], args[1]);
+        commands.push({
+          ...base,
+          type: "smooth",
+          x: px(args[0]),
+          y: px(args[1]),
+          cubic: false,
+          c1: CP(px(0), px(0), anchor),
+        });
+        break;
+      case "a":
+        end = abs(args[5], args[6]);
+        commands.push({
+          ...base,
+          type: "arc",
+          x: px(args[5]),
+          y: px(args[6]),
+          rx: px(Math.abs(args[0])),
+          ry: px(Math.abs(args[1])),
+          circle: Math.abs(args[0]) === Math.abs(args[1]),
+          rotate: r2(args[2]),
+          size: args[3] ? "large" : "small",
+          sweep: args[4] ? "cw" : "ccw",
+        });
+        break;
+      case "z":
+        end = { ...sub };
+        commands.push({ id: uid(), type: "close", rel: "to" });
+        break;
+      default:
+        break;
+    }
+
+    cur = { ...end };
+    pts.push({ ...end });
+  }
+
+  if (!from) from = { x: 0, y: 0 };
+  const all = [from, ...pts].map((p) => (Array.isArray(p) ? { x: p[0], y: p[1] } : p));
+  const xs = all.map((p) => p.x);
+  const ys = all.map((p) => p.y);
+  const bbox = {
+    x0: Math.min(...xs),
+    y0: Math.min(...ys),
+    w: Math.max(...xs) - Math.min(...xs),
+    h: Math.max(...ys) - Math.min(...ys),
+  };
+  return {
+    shape: { fillRule: "nonzero", from: { x: px(from.x), y: px(from.y) }, commands },
+    bbox,
+  };
+}
+
+/* Rescale a pixel-valued shape into percentages of a frame. Absolute values are
+   offset then divided; deltas and radii are only divided. */
+function rescale(shape, frame) {
+  const { x0, y0, w, h } = frame;
+  const A = (val, o, size) => (val.u === "px" ? V(r2(((val.v - o) * 100) / size), "%") : val);
+  const D = (val, size) => (val.u === "px" ? V(r2((val.v * 100) / size), "%") : val);
+  const cp = (c) =>
+    c.from === "origin"
+      ? { ...c, x: A(c.x, x0, w), y: A(c.y, y0, h) }
+      : { ...c, x: D(c.x, w), y: D(c.y, h) };
+
+  const commands = shape.commands.map((c) => {
+    if (c.type === "close") return c;
+    const absolute = c.rel === "to";
+    const n = {
+      ...c,
+      x: absolute ? A(c.x, x0, w) : D(c.x, w),
+      y: absolute ? A(c.y, y0, h) : D(c.y, h),
+    };
+    if (c.type === "arc") {
+      // rx resolves against the box width and ry against its height, so a
+      // circle only stays circular if both scale by the same factor.
+      n.rx = D(c.rx, w);
+      n.ry = D(c.ry, h);
+      n.circle = false;
+    }
+    if (c.c1) n.c1 = cp(c.c1);
+    if (c.c2) n.c2 = cp(c.c2);
+    return n;
+  });
+
+  return {
+    ...shape,
+    from: { x: A(shape.from.x, x0, w), y: A(shape.from.y, y0, h) },
+    commands,
+  };
+}
+
+/* Turn the SVG shape elements into path data so one code path handles them all. */
+function elementToPathData(tag, a) {
+  const n = (k, d = 0) => {
+    const v = parseFloat(a[k]);
+    return Number.isFinite(v) ? v : d;
+  };
+  switch (tag) {
+    case "path":
+      return a.d || null;
+    case "line":
+      return `M${n("x1")},${n("y1")}L${n("x2")},${n("y2")}`;
+    case "polyline":
+    case "polygon": {
+      const nums = String(a.points || "")
+        .trim()
+        .split(/[\s,]+/)
+        .map(Number)
+        .filter((v) => Number.isFinite(v));
+      if (nums.length < 4) return null;
+      let out = `M${nums[0]},${nums[1]}`;
+      for (let i = 2; i < nums.length - 1; i += 2) out += `L${nums[i]},${nums[i + 1]}`;
+      return tag === "polygon" ? out + "Z" : out;
+    }
+    case "rect": {
+      const x = n("x");
+      const y = n("y");
+      const w = n("width");
+      const h = n("height");
+      if (!(w > 0) || !(h > 0)) return null;
+      const hasRx = a.rx !== undefined && a.rx !== "";
+      const hasRy = a.ry !== undefined && a.ry !== "";
+      let rx = Math.min(hasRx ? n("rx") : hasRy ? n("ry") : 0, w / 2);
+      let ry = Math.min(hasRy ? n("ry") : hasRx ? n("rx") : 0, h / 2);
+      if (!(rx > 0) || !(ry > 0)) return `M${x},${y}H${x + w}V${y + h}H${x}Z`;
+      return (
+        `M${x + rx},${y}H${x + w - rx}A${rx},${ry} 0 0 1 ${x + w},${y + ry}` +
+        `V${y + h - ry}A${rx},${ry} 0 0 1 ${x + w - rx},${y + h}` +
+        `H${x + rx}A${rx},${ry} 0 0 1 ${x},${y + h - ry}` +
+        `V${y + ry}A${rx},${ry} 0 0 1 ${x + rx},${y}Z`
+      );
+    }
+    case "circle": {
+      const cx = n("cx");
+      const cy = n("cy");
+      const rr = n("r");
+      if (!(rr > 0)) return null;
+      return `M${cx - rr},${cy}A${rr},${rr} 0 1 1 ${cx + rr},${cy}A${rr},${rr} 0 1 1 ${cx - rr},${cy}Z`;
+    }
+    case "ellipse": {
+      const cx = n("cx");
+      const cy = n("cy");
+      const rx = n("rx");
+      const ry = n("ry");
+      if (!(rx > 0) || !(ry > 0)) return null;
+      return `M${cx - rx},${cy}A${rx},${ry} 0 1 1 ${cx + rx},${cy}A${rx},${ry} 0 1 1 ${cx - rx},${cy}Z`;
+    }
+    default:
+      return null;
+  }
+}
+
+const SVG_SHAPE_SELECTOR = "path,polygon,polyline,rect,circle,ellipse,line";
+
+function readSvgMarkup(text) {
+  const doc = new DOMParser().parseFromString(text, "image/svg+xml");
+  if (doc.querySelector("parsererror")) throw new Error("That isn't valid SVG markup");
+  const svg = doc.querySelector("svg") || doc.documentElement;
+  const els = Array.from(doc.querySelectorAll(SVG_SHAPE_SELECTOR));
+  if (!els.length) throw new Error("No path, polygon, rect, circle or ellipse found in that SVG");
+
+  const notes = [];
+  const datas = [];
+  let transformed = 0;
+  for (const el of els) {
+    let node = el;
+    while (node && node.getAttribute) {
+      if (node.getAttribute("transform")) {
+        transformed++;
+        break;
+      }
+      node = node.parentElement;
+    }
+    const attrs = {};
+    for (const at of Array.from(el.attributes || [])) attrs[at.name] = at.value;
+    const d = elementToPathData(el.tagName.toLowerCase().replace(/^svg:/, ""), attrs);
+    if (d) datas.push(d);
+  }
+  if (!datas.length) throw new Error("Those elements had nothing drawable in them");
+  if (datas.length > 1)
+    notes.push(`${datas.length} elements merged into one shape — overlaps now resolve through the fill rule`);
+  if (transformed) notes.push(`transform on ${transformed} element(s) was ignored`);
+
+  let frame = null;
+  const vb = svg && svg.getAttribute && svg.getAttribute("viewBox");
+  if (vb) {
+    const [x0, y0, w, h] = vb.trim().split(/[\s,]+/).map(Number);
+    if (w > 0 && h > 0) frame = { x0, y0, w, h };
+  }
+  if (!frame && svg && svg.getAttribute) {
+    const w = parseFloat(svg.getAttribute("width"));
+    const h = parseFloat(svg.getAttribute("height"));
+    if (w > 0 && h > 0) frame = { x0: 0, y0: 0, w, h };
+  }
+  if (!frame) notes.push("no viewBox, so the shape was fitted to its own bounding box");
+
+  const rule =
+    els[0].getAttribute("fill-rule") || els[0].getAttribute("clip-rule") || "nonzero";
+  return { d: datas.join(" "), frame, fillRule: rule === "evenodd" ? "evenodd" : "nonzero", notes };
+}
+
+function detectFormat(text) {
+  const t = text.trim();
+  if (!t) return null;
+  if (/shape\s*\(/i.test(t)) return "css";
+  if (/<\s*(svg|path|polygon|polyline|rect|circle|ellipse)\b/i.test(t)) return "svg";
+  if (/^[Mm][\s,.\d+-]/.test(t)) return "path";
+  return null;
+}
+
+function importAny(text, { units = "percent" } = {}) {
+  const kind = detectFormat(text);
+  if (!kind)
+    throw new Error("Paste a shape() value, an <svg> element, or a path d attribute");
+
+  if (kind === "css") return { shape: parseShape(text), frame: null, notes: [], kind };
+
+  let d = text.trim();
+  let frame = null;
+  let fillRule = "nonzero";
+  const notes = [];
+
+  if (kind === "svg") {
+    const read = readSvgMarkup(text);
+    d = read.d;
+    frame = read.frame;
+    fillRule = read.fillRule;
+    notes.push(...read.notes);
+  }
+
+  const { shape, bbox } = pathDataToShape(d);
+  shape.fillRule = fillRule;
+  const box = frame || bbox;
+  if (!(box.w > 0) || !(box.h > 0)) throw new Error("That path has no area to scale into");
+
+  if (units === "percent") return { shape: rescale(shape, box), frame: box, notes, kind };
+  notes.push("kept in pixels, so the shape will not scale with the box");
+  return { shape, frame: box, notes, kind };
+}
+
+/* ============================================================================
+   PRESETS
+   ========================================================================== */
+
+const PRESETS = {
+  Triangle: "shape(from 50% 0%, line to 100% 100%, line to 0% 100%, close)",
+  Star:
+    "shape(from 50% 2%, line to 61% 35%, line to 97% 35%, line to 68% 57%, " +
+    "line to 79% 91%, line to 50% 70%, line to 21% 91%, line to 32% 57%, " +
+    "line to 3% 35%, line to 39% 35%, close)",
+  Heart:
+    "shape(from 10% 35%, arc to 50% 35% of 1% cw, arc to 90% 35% of 1% cw, " +
+    "curve to 50% 95% with 90% 65% from origin, " +
+    "curve to 10% 35% with 10% 65% from origin, close)",
+  Ticket:
+    "shape(from 0% 0%, hline to 100%, vline to 42%, arc to 100% 58% of 6% ccw, " +
+    "vline to 100%, hline to 0%, vline to 58%, arc to 0% 42% of 6% ccw, close)",
+  Blob:
+    "shape(from 44% 3%, " +
+    "curve to 97% 38% with 72% 3% from origin / 97% 14% from origin, " +
+    "smooth to 62% 96% with 88% 90% from origin, " +
+    "smooth to 9% 62% with 12% 88% from origin, " +
+    "smooth to 44% 3% with 20% 3% from origin, close)",
+  Wave:
+    "shape(from 0% 0%, hline to 100%, vline to 70%, " +
+    "curve to 66% 82% with 88% 62% from origin / 80% 84% from origin, " +
+    "smooth to 33% 74% with 46% 66% from origin, " +
+    "smooth to 0% 84% with 12% 82% from origin, close)",
+  Chevron:
+    "shape(from 0% 0%, line to 78% 0%, line to 100% 50%, line to 78% 100%, " +
+    "line to 0% 100%, line to 22% 50%, close)",
+  Frame:
+    "shape(evenodd from 0% 0%, hline to 100%, vline to 100%, hline to 0%, close, " +
+    "move to 18% 18%, hline to 82%, vline to 82%, hline to 18%, close)",
+};
+
+const FORMAT_LABEL = { css: "shape()", svg: "SVG markup", path: "path data" };
+
+/* ============================================================================
+   VIEW — plain DOM, no framework
+   ----------------------------------------------------------------------------
+   Rendering is deliberately split three ways so that editing never fights the
+   browser:
+
+     renderRows()  rebuilds the command list. Only when the list changes shape
+                   — add, delete, reorder, type swap, or a toggle that adds or
+                   removes a field. Typing in a number never triggers it, so
+                   the caret survives.
+     recompute()   re-evaluates the geometry, repaints the bed and the output.
+     setHover()    toggles classes on elements already in the DOM. It must not
+                   rebuild the bed: replacing the node under the cursor would
+                   fire pointerout/pointerover again and loop.
+   ========================================================================== */
+
+const PAD = 28;
+const $ = (sel) => document.querySelector(sel);
+
+const SUPPORTS_SHAPE = (() => {
+  try {
+    return CSS.supports("clip-path", "shape(from 0 0, line to 10px 10px)");
+  } catch (err) {
+    return false;
+  }
+})();
+
+const RESTING_HINT =
+  "Drag a point on the bed, or hover a step to light up the segment it draws. " +
+  "Arrow keys nudge a focused point, Shift for bigger steps.";
+
+const state = {
+  shape: parseShape(PRESETS.Blob),
+  W: 320,
+  H: 320,
+  hover: null,
+  snapOn: false,
+  showGrid: true,
+  compact: false,
+  property: "clip-path",
+  importUnits: "percent",
+  animate: false,
+  focusedHandle: null,
+};
+
+let geo = null;
+
+/* ---------------------------------------------------------------- utilities */
+
+const esc = (s) =>
+  String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+const getAt = (obj, path) => path.split(".").reduce((o, k) => (o ? o[k] : undefined), obj);
+
+function setAt(obj, path, value) {
+  const keys = path.split(".");
+  const last = keys.pop();
+  keys.reduce((o, k) => o[k], obj)[last] = value;
+}
+
+/* Which box dimension a value is measured against — x-ish against the width,
+   y-ish against the height. Needed to switch units without moving the point. */
+const basisFor = (path) => (/(^|\.)(y|ry)$/.test(path) ? state.H : state.W);
+
+const targetFor = (id) =>
+  id === "__shape" ? state.shape : state.shape.commands.find((c) => c.id === id);
+
+/* ------------------------------------------------------------ html builders */
+
+function numUnit(id, path, val, label, step) {
+  return (
+    `<span class="numunit" title="${esc(label)}"><em>${esc(label)}</em>` +
+    `<input type="number" step="${step || 1}" value="${val.v}" aria-label="${esc(label)}" ` +
+    `data-id="${id}" data-path="${path}">` +
+    `<button type="button" class="unit" data-unit data-id="${id}" data-path="${path}" ` +
+    `title="Switch between % and px, keeping the point where it is">${val.u}</button></span>`
+  );
+}
+
+function pick(id, path, value, options, title, rebuild) {
+  return (
+    `<select data-id="${id}" data-path="${path}" title="${esc(title)}"${rebuild ? " data-rebuild" : ""}>` +
+    options.map((o) => `<option value="${o}"${o === value ? " selected" : ""}>${o}</option>`).join("") +
+    `</select>`
+  );
+}
+
+function check(id, path, on, label, title, rebuild) {
+  return (
+    `<label class="check" title="${esc(title || label)}">` +
+    `<input type="checkbox" data-id="${id}" data-path="${path}" data-bool` +
+    `${rebuild ? " data-rebuild" : ""}${on ? " checked" : ""}> ${esc(label)}</label>`
+  );
+}
+
+function controlRow(cmd, key, label) {
+  const cp = cmd[key];
+  return (
+    `<div class="cprow"><span class="cplabel">${label}</span>` +
+    numUnit(cmd.id, key + ".x", cp.x, "x") +
+    numUnit(cmd.id, key + ".y", cp.y, "y") +
+    pick(cmd.id, key + ".from", cp.from, ["origin", "start", "end"],
+         "What the control point is measured from") +
+    `</div>`
+  );
+}
+
+function rowHtml(c, index) {
+  let body = "";
+  if (c.type !== "close") {
+    body = `<div class="rowbody">`;
+    if (c.type !== "vline") body += numUnit(c.id, "x", c.x, "x");
+    if (c.type !== "hline") body += numUnit(c.id, "y", c.y, "y");
+    if (c.type === "curve" || c.type === "smooth")
+      body += check(c.id, "cubic", c.cubic, "cubic", "Two control points instead of one", true);
+    if (c.type === "arc") {
+      body += numUnit(c.id, "rx", c.rx, "rx");
+      if (!c.circle) body += numUnit(c.id, "ry", c.ry, "ry");
+      body += check(c.id, "circle", c.circle, "circle", "Use one radius for both axes", true);
+      body += pick(c.id, "sweep", c.sweep, ["cw", "ccw"], "Sweep direction");
+      body += pick(c.id, "size", c.size, ["small", "large"], "Which of the two possible arcs");
+      body +=
+        `<span class="numunit" title="Ellipse rotation"><em>rot</em>` +
+        `<input type="number" step="5" value="${c.rotate}" aria-label="rotation in degrees" ` +
+        `data-id="${c.id}" data-path="rotate" data-plain>` +
+        `<span class="unit static">deg</span></span>`;
+    }
+    body += `</div>`;
+  }
+
+  let cps = "";
+  if (c.type === "curve")
+    cps = controlRow(c, "c1", c.cubic ? "control 1" : "control") +
+          (c.cubic ? controlRow(c, "c2", "control 2") : "");
+  else if (c.type === "smooth" && c.cubic) cps = controlRow(c, "c1", "control");
+  if (cps) cps = `<div class="cpgroup">${cps}</div>`;
+
+  return (
+    `<li class="row${state.hover === c.id ? " is-hot" : ""}" data-row="${c.id}" data-index="${index}">` +
+    `<div class="rowhead"><span class="idx">${index + 1}</span>` +
+    pick(c.id, "type", c.type, Object.keys(COMMANDS), BLURB[c.type], true) +
+    (c.type !== "close"
+      ? pick(c.id, "rel", c.rel, ["to", "by"],
+             "to = from the box origin, by = from the previous point")
+      : "") +
+    `<span class="spacer"></span>` +
+    `<button type="button" data-act="up" title="Move earlier" aria-label="Move earlier">&#8593;</button>` +
+    `<button type="button" data-act="down" title="Move later" aria-label="Move later">&#8595;</button>` +
+    `<button type="button" data-act="dup" title="Duplicate" aria-label="Duplicate">&#10697;</button>` +
+    `<button type="button" data-act="del" title="Delete" aria-label="Delete">&#10005;</button></div>` +
+    body + cps +
+    `<code class="frag" data-frag="${c.id}">${esc(cmdCss(c, state.compact))}</code></li>`
+  );
+}
+
+/* ------------------------------------------------------------------ the bed */
+
+/* Handles are drawn in viewBox units but should stay a constant size on
+   screen, so everything is multiplied by this. preserveAspectRatio="meet"
+   fits the drawing to whichever axis runs out first, so the scale has to be
+   taken from both — using width alone leaves the handles far too small on a
+   tall box, where the height cap is what is really doing the fitting. */
+function bedScale() {
+  const r = $("#bed").getBoundingClientRect();
+  if (!r.width || !r.height) return 1;
+  return Math.max((state.W + PAD * 2) / r.width, (state.H + PAD * 2) / r.height);
+}
+
+function renderBed() {
+  const { W, H, showGrid, hover, shape } = state;
+  const svg = $("#bed");
+  svg.setAttribute("viewBox", `${-PAD} ${-PAD} ${W + PAD * 2} ${H + PAD * 2}`);
+  const k = bedScale();
+  let out = "";
+
+  if (showGrid) {
+    out += `<g class="gridlines">`;
+    for (let i = 0; i <= 10; i++) {
+      const sw = (i % 5 === 0 ? 1.4 : 0.7) * k;
+      out += `<line x1="${(i * W) / 10}" y1="0" x2="${(i * W) / 10}" y2="${H}" stroke-width="${sw}"/>` +
+             `<line x1="0" y1="${(i * H) / 10}" x2="${W}" y2="${(i * H) / 10}" stroke-width="${sw}"/>`;
+    }
+    out += `</g>`;
+  }
+
+  out += `<rect class="box" x="0" y="0" width="${W}" height="${H}" stroke-width="${1.5 * k}"/>`;
+  out += `<path class="fill" d="${geo.d}" fill-rule="${shape.fillRule}"/>`;
+
+  for (const s of geo.segments)
+    for (const [a, b] of s.tangents)
+      out += `<line class="tangent" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" ` +
+             `stroke-width="${k}" stroke-dasharray="${3 * k} ${3 * k}"/>`;
+
+  for (const s of geo.segments) {
+    const hot = hover === s.id;
+    const dash = s.type === "move" ? ` stroke-dasharray="${5 * k} ${4 * k}"` : "";
+    out += `<path class="seg${hot ? " is-hot" : ""}${s.type === "move" ? " is-jump" : ""}" ` +
+           `d="${s.segPath}" data-sid="${s.id}" stroke-width="${(hot ? 4 : 2.25) * k}"${dash}/>` +
+           `<path class="hit" d="${s.segPath}" stroke-width="${14 * k}" data-seg="${s.id}"/>`;
+  }
+
+  for (const s of geo.segments)
+    for (const g of s.ghosts)
+      out += `<circle class="ghost" cx="${g.x}" cy="${g.y}" r="${4 * k}" stroke-width="${1.2 * k}"/>`;
+
+  geo.handles.forEach((h, i) => {
+    const inner =
+      h.kind === "control"
+        ? `<rect class="ctrl" x="${h.pt.x - 4.5 * k}" y="${h.pt.y - 4.5 * k}" ` +
+          `width="${9 * k}" height="${9 * k}" stroke-width="${1.6 * k}"/>`
+        : `<circle class="node${h.key === "from" ? " is-origin" : ""}` +
+          `${h.kind === "move" ? " is-jump" : ""}${hover === h.cmdId ? " is-hot" : ""}" ` +
+          `cx="${h.pt.x}" cy="${h.pt.y}" r="${(h.key === "from" ? 6.5 : 5) * k}" ` +
+          `stroke-width="${2 * k}" data-nid="${h.cmdId || ""}"/>`;
+    out += `<g class="handle" data-h="${i}" data-key="${h.target}-${h.key}"` +
+           `${h.cmdId ? ` data-seg="${h.cmdId}"` : ""} tabindex="0" role="slider" ` +
+           `aria-label="${h.kind} point" ` +
+           `aria-valuetext="${Math.round(h.pt.x)}, ${Math.round(h.pt.y)} pixels">` +
+           `<circle class="halo" cx="${h.pt.x}" cy="${h.pt.y}" r="${11 * k}"/>${inner}</g>`;
+  });
+
+  // Replacing the markup drops focus, so put it back — but only if focus was
+  // inside the bed to begin with. Otherwise a repaint triggered by typing in a
+  // number input would steal the caret away from it.
+  const restore = svg.contains(document.activeElement) ? state.focusedHandle : null;
+  svg.innerHTML = out;
+  if (restore) {
+    const el = svg.querySelector(`[data-key="${restore}"]`);
+    if (el) el.focus({ preventScroll: true });
+  }
+}
+
+/* --------------------------------------------------------------- the output */
+
+const cssValue = (multiline) =>
+  shapeCss(state.shape, {
+    compact: state.compact,
+    fillRule: state.property !== "offset-path",
+    multiline: multiline !== false,
+  });
+
+function renderOutput() {
+  const { property, shape, W, H } = state;
+  $("#code").textContent = `${property}: ${cssValue()};`;
+  $("#stepcount").textContent = `${shape.commands.length} steps`;
+
+  for (const c of shape.commands) {
+    const el = document.querySelector(`[data-frag="${c.id}"]`);
+    if (el) el.textContent = cmdCss(c, state.compact);
+  }
+
+  const warn = [];
+  if (property === "offset-path" && shape.fillRule !== "nonzero")
+    warn.push(`offset-path rejects a fill-rule, so <code>${shape.fillRule}</code> is left out of ` +
+              `the value below.`);
+  if (!SUPPORTS_SHAPE)
+    warn.push("This browser can't render <code>shape()</code> yet, so the preview box below stays " +
+              "unclipped. The plotting bed above still draws the real geometry.");
+  $("#warnings").innerHTML = warn.map((w) => `<p class="warn">${w}</p>`).join("");
+
+  const preview = $("#preview");
+  const value = cssValue(false);
+  preview.style.width = W + "px";
+  preview.style.height = H + "px";
+  preview.style.setProperty("clip-path", property === "clip-path" ? value : "");
+  preview.style.setProperty("border-shape", property === "border-shape" ? value : "");
+  preview.classList.toggle("is-bordered", property === "border-shape");
+
+  const onPath = property === "offset-path";
+  const traveller = $("#traveller");
+  traveller.hidden = !onPath;
+  if (onPath) {
+    traveller.style.setProperty(
+      "offset-path",
+      shapeCss(shape, { compact: state.compact, fillRule: false, multiline: false })
+    );
+    traveller.classList.toggle("is-running", state.animate);
+  }
+  $("#previewcap").innerHTML = onPath
+    ? `<button type="button" class="ghostbtn" data-act="animate">${
+        state.animate ? "Stop the traveller" : "Send a box along the path"
+      }</button>`
+    : `Live ${property} on a ${W}&times;${H} box`;
+}
+
+/* ---------------------------------------------------------------- rendering */
+
+function recompute() {
+  geo = evaluate(state.shape, state.W, state.H);
+  renderBed();
+  renderOutput();
+}
+
+function renderRows() {
+  const list = $("#rows");
+  const scroll = list.scrollTop;
+  list.innerHTML = state.shape.commands.map(rowHtml).join("");
+  list.scrollTop = scroll;
+  $("#fromrow").innerHTML =
+    `<span class="cplabel">from</span>` +
+    numUnit("__shape", "from.x", state.shape.from.x, "x") +
+    numUnit("__shape", "from.y", state.shape.from.y, "y");
+}
+
+function renderAll() {
+  renderRows();
+  recompute();
+}
+
+/* Push new numbers into inputs after a drag without rebuilding the row, so
+   focus and caret position survive. */
+function syncInputs(id) {
+  const obj = targetFor(id);
+  if (!obj) return;
+  document.querySelectorAll(`[data-id="${id}"]`).forEach((el) => {
+    const path = el.dataset.path;
+    if (!path) return;
+    const val = getAt(obj, path);
+    if (val === undefined) return;
+    if (el.dataset.unit !== undefined) el.textContent = val.u;
+    else if (el.tagName === "INPUT" && el.type === "number")
+      el.value = el.dataset.plain !== undefined ? val : val.v;
+  });
+}
+
+/* Hover only toggles classes — never a rebuild. See the note at the top. */
+function setHover(id) {
+  if (state.hover === id) return;
+  state.hover = id;
+  const k = bedScale();
+
+  document.querySelectorAll("#rows .row").forEach((li) =>
+    li.classList.toggle("is-hot", li.dataset.row === id)
+  );
+  $("#bed").querySelectorAll("[data-sid]").forEach((p) => {
+    const hot = p.dataset.sid === id;
+    p.classList.toggle("is-hot", hot);
+    p.setAttribute("stroke-width", (hot ? 4 : 2.25) * k);
+  });
+  $("#bed").querySelectorAll("[data-nid]").forEach((c) =>
+    c.classList.toggle("is-hot", !!id && c.dataset.nid === id)
+  );
+
+  const cmd = id && state.shape.commands.find((c) => c.id === id);
+  $("#why").textContent = cmd ? BLURB[cmd.type] : RESTING_HINT;
+}
+
+/* ================================= EVENTS ================================= */
+
+/* --- bed: drag, hover, keyboard nudge ------------------------------------ */
+
+function localPoint(e) {
+  const svg = $("#bed");
+  const pt = svg.createSVGPoint();
+  pt.x = e.clientX;
+  pt.y = e.clientY;
+  return pt.matrixTransform(svg.getScreenCTM().inverse());
+}
+
+function applyHandle(handle, point) {
+  const id = handle.target === "shape" ? "__shape" : handle.target;
+  Object.assign(targetFor(id), handle.apply(point));
+  syncInputs(id);
+  recompute();
+}
+
+const bed = $("#bed");
+
+bed.addEventListener("pointerdown", (e) => {
+  const g = e.target.closest("[data-h]");
+  if (!g) return;
+  e.preventDefault();
+  const handle = geo.handles[+g.dataset.h];
+  state.focusedHandle = g.dataset.key;
+
+  const move = (ev) => {
+    let p = localPoint(ev);
+    // Read the step now, not when the checkbox was ticked — the box may have
+    // been resized since.
+    const step = state.snapOn ? state.W / 40 : 0;
+    if (step > 0 && !ev.altKey)
+      p = { x: Math.round(p.x / step) * step, y: Math.round(p.y / step) * step };
+    applyHandle(handle, p);
+  };
+  const up = () => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+});
+
+bed.addEventListener("keydown", (e) => {
+  const g = e.target.closest("[data-h]");
+  if (!g) return;
+  const step = e.shiftKey ? 10 : 1;
+  const delta = {
+    ArrowLeft: [-step, 0], ArrowRight: [step, 0],
+    ArrowUp: [0, -step], ArrowDown: [0, step],
+  }[e.key];
+  if (!delta) return;
+  e.preventDefault();
+  const handle = geo.handles[+g.dataset.h];
+  state.focusedHandle = g.dataset.key;
+  applyHandle(handle, { x: handle.pt.x + delta[0], y: handle.pt.y + delta[1] });
+});
+
+bed.addEventListener("focusin", (e) => {
+  const g = e.target.closest("[data-h]");
+  state.focusedHandle = g ? g.dataset.key : null;
+});
+
+bed.addEventListener("pointerover", (e) => {
+  const el = e.target.closest("[data-seg]");
+  if (el) setHover(el.dataset.seg);
+});
+bed.addEventListener("pointerleave", () => setHover(null));
+
+/* --- command list -------------------------------------------------------- */
+
+const panel = $(".panel");
+
+panel.addEventListener("input", (e) => {
+  const el = e.target;
+  if (el.type !== "number" || !el.dataset.path) return;
+  const obj = targetFor(el.dataset.id);
+  if (!obj) return;
+  const n = parseFloat(el.value) || 0;
+  if (el.dataset.plain !== undefined) setAt(obj, el.dataset.path, n);
+  else setAt(obj, el.dataset.path, { ...getAt(obj, el.dataset.path), v: n });
+  recompute();
+});
+
+panel.addEventListener("change", (e) => {
+  const el = e.target;
+  const isBool = el.dataset.bool !== undefined;
+  if (!el.dataset.path || (el.tagName !== "SELECT" && !isBool)) return;
+  const id = el.dataset.id;
+  const obj = targetFor(id);
+  if (!obj) return;
+
+  if (el.dataset.path === "type") {
+    // Keep the point exactly where it is; drop fields the new type has no use for.
+    const seg = geo.segments.find((s) => s.id === id);
+    const at = seg ? seg.end : geo.start0;
+    const next = makeCommand(el.value, {
+      xPct: state.W ? (at.x * 100) / state.W : 50,
+      yPct: state.H ? (at.y * 100) / state.H : 50,
+    }, true);
+    Object.assign(obj, next, { id });
+    for (const key of Object.keys(obj))
+      if (!(key in next) && key !== "id") delete obj[key];
+  } else {
+    setAt(obj, el.dataset.path, isBool ? el.checked : el.value);
+  }
+
+  if (el.dataset.rebuild !== undefined) renderRows();
+  recompute();
+});
+
+panel.addEventListener("click", (e) => {
+  const unit = e.target.closest("[data-unit]");
+  if (unit) {
+    const obj = targetFor(unit.dataset.id);
+    const path = unit.dataset.path;
+    const val = getAt(obj, path);
+    const basis = basisFor(path);
+    // Convert as well as swap, so toggling the unit never moves the point.
+    setAt(obj, path, val.u === "%"
+      ? { v: r2((val.v * basis) / 100), u: "px" }
+      : { v: r2(basis ? (val.v * 100) / basis : 0), u: "%" });
+    syncInputs(unit.dataset.id);
+    recompute();
+    return;
+  }
+
+  const btn = e.target.closest("[data-act]");
+  const li = btn && btn.closest("[data-row]");
+  if (!li) return;
+  const i = +li.dataset.index;
+  const list = state.shape.commands;
+
+  if (btn.dataset.act === "del") list.splice(i, 1);
+  else if (btn.dataset.act === "dup")
+    list.splice(i + 1, 0, Object.assign(JSON.parse(JSON.stringify(list[i])), { id: uid() }));
+  else {
+    const j = i + (btn.dataset.act === "up" ? -1 : 1);
+    if (j < 0 || j >= list.length) return;
+    [list[i], list[j]] = [list[j], list[i]];
+  }
+  state.hover = null;
+  renderAll();
+});
+
+panel.addEventListener("mouseover", (e) => {
+  const li = e.target.closest("[data-row]");
+  if (li) setHover(li.dataset.row);
+});
+panel.addEventListener("mouseleave", () => setHover(null));
+
+/* --- header controls ----------------------------------------------------- */
+
+$("#prop").addEventListener("change", (e) => {
+  state.property = e.target.value;
+  renderOutput();
+});
+$("#fillrule").addEventListener("change", (e) => {
+  state.shape.fillRule = e.target.value;
+  recompute();
+});
+const MIN_BOX = 20;
+const MAX_BOX = 4000;
+
+/* While typing, follow the field but ignore half-finished input ("" or "-")
+   so the box doesn't jump to a default mid-keystroke. On blur, clamp and write
+   the clamped number back, so the field never disagrees with the shape. */
+function boxInput(el, key) {
+  const n = parseFloat(el.value);
+  if (!Number.isFinite(n) || n <= 0) return;
+  state[key] = Math.min(MAX_BOX, n);
+  recompute();
+}
+function boxCommit(el, key) {
+  const n = parseFloat(el.value);
+  state[key] = Number.isFinite(n) ? Math.min(MAX_BOX, Math.max(MIN_BOX, n)) : 320;
+  el.value = state[key];
+  recompute();
+}
+
+$("#boxw").addEventListener("input", (e) => boxInput(e.target, "W"));
+$("#boxh").addEventListener("input", (e) => boxInput(e.target, "H"));
+$("#boxw").addEventListener("change", (e) => boxCommit(e.target, "W"));
+$("#boxh").addEventListener("change", (e) => boxCommit(e.target, "H"));
+
+$("#showgrid").addEventListener("change", (e) => {
+  state.showGrid = e.target.checked;
+  renderBed();
+});
+$("#snap").addEventListener("change", (e) => {
+  state.snapOn = e.target.checked;
+});
+$("#compact").addEventListener("change", (e) => {
+  state.compact = e.target.checked;
+  renderOutput();
+});
+
+/* --- presets and the add buttons ----------------------------------------- */
+
+$("#presets").innerHTML = Object.keys(PRESETS)
+  .map((p) => `<button type="button" data-preset="${p}">${p}</button>`)
+  .join("");
+$("#presets").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-preset]");
+  if (!b) return;
+  state.shape = parseShape(PRESETS[b.dataset.preset]);
+  state.hover = null;
+  $("#fillrule").value = state.shape.fillRule;
+  renderAll();
+});
+
+$("#adds").innerHTML = Object.keys(COMMANDS)
+  .map((t) => `<button type="button" data-add="${t}" title="${esc(BLURB[t])}">+ ${t}</button>`)
+  .join("");
+$("#adds").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-add]");
+  if (!b) return;
+  const last = geo.segments[geo.segments.length - 1];
+  const at = last ? last.end : geo.start0;
+  state.shape.commands.push(
+    makeCommand(b.dataset.add, {
+      xPct: state.W ? (at.x * 100) / state.W : 50,
+      yPct: state.H ? (at.y * 100) / state.H : 50,
+    })
+  );
+  renderAll();
+  $("#rows").scrollTop = $("#rows").scrollHeight;
+});
+
+/* --- copying and the traveller ------------------------------------------- */
+
+function copy(text, btn, label) {
+  const done = () => {
+    btn.textContent = "Copied";
+    setTimeout(() => (btn.textContent = label), 1400);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText)
+    navigator.clipboard.writeText(text).then(done, () => {});
+  else done();
+}
+
+$("#copycss").addEventListener("click", (e) =>
+  copy(`${state.property}: ${cssValue()};`, e.currentTarget, "Copy CSS")
+);
+$("#copysvg").addEventListener("click", (e) => copy(geo.d, e.currentTarget, "Copy SVG path"));
+
+$("#previewcap").addEventListener("click", (e) => {
+  if (!e.target.closest('[data-act="animate"]')) return;
+  state.animate = !state.animate;
+  renderOutput();
+});
+
+/* --- the importer -------------------------------------------------------- */
+
+const importBox = $("#imp");
+
+function refreshBadge() {
+  const msg = $("#importmsg");
+  msg.textContent = "";
+  msg.className = "";
+  const kind = detectFormat(importBox.value);
+  const badge = $("#badge");
+  badge.hidden = !kind;
+  if (kind) {
+    badge.textContent = FORMAT_LABEL[kind];
+    badge.className = `badge is-${kind}`;
+  }
+  $("#load").disabled = !kind;
+}
+
+function doImport() {
+  const msg = $("#importmsg");
+  try {
+    const res = importAny(importBox.value, {
+      units: state.importUnits === "pixels" ? "px" : "percent",
+    });
+    state.shape = res.shape;
+    // Percentages only hold their proportions if the editing box keeps the
+    // source's aspect ratio, so match it on the way in.
+    if (res.frame && state.importUnits === "percent") {
+      const aspect = res.frame.w / res.frame.h;
+      state.W = Math.max(80, aspect >= 1 ? 340 : Math.round(340 * aspect));
+      state.H = Math.max(80, aspect >= 1 ? Math.round(340 / aspect) : 340);
+      $("#boxw").value = state.W;
+      $("#boxh").value = state.H;
+    }
+    state.hover = null;
+    $("#fillrule").value = state.shape.fillRule;
+    msg.className = "note";
+    msg.textContent = [`Loaded ${
+      { css: "a shape() value", svg: "an SVG", path: "path data" }[res.kind]
+    }`].concat(res.notes).join(" — ");
+    renderAll();
+  } catch (err) {
+    msg.className = "warn";
+    msg.textContent = err.message;
+  }
+}
+
+importBox.addEventListener("input", refreshBadge);
+importBox.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") doImport();
+});
+$("#load").addEventListener("click", doImport);
+$("#units").addEventListener("change", (e) => {
+  state.importUnits = e.target.value;
+});
+
+/* --- boot ---------------------------------------------------------------- */
+
+$("#why").textContent = RESTING_HINT;
+refreshBadge();
+renderAll();
+
+// Handle sizes are held constant on screen, so a resize means a repaint.
+new ResizeObserver(() => renderBed()).observe(bed);
+</script>
+</body>
+</html>
